@@ -130,4 +130,6 @@ CMakeFiles/main.dir/main.cpp.o: /usr/local/include/opencv2/videostab/outlier_rej
 CMakeFiles/main.dir/main.cpp.o: /usr/local/include/opencv2/videostab/ring_buffer.hpp
 CMakeFiles/main.dir/main.cpp.o: /usr/local/include/opencv2/videostab/stabilizer.hpp
 CMakeFiles/main.dir/main.cpp.o: /usr/local/include/opencv2/videostab/wobble_suppression.hpp
+CMakeFiles/main.dir/main.cpp.o: /usr/local/include/wiringPi.h
+CMakeFiles/main.dir/main.cpp.o: /usr/local/include/wiringSerial.h
 
