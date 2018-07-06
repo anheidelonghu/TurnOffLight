@@ -6,7 +6,7 @@
 
 #IncludeRegexTransform: 
 
-/home/code/TurnOffLight/main.cpp
+/home/code/TurnOffLight/main_mul.cpp
 opencv2/opencv.hpp
 -
 opencv2/highgui.hpp
@@ -23,9 +23,15 @@ string.h
 -
 errno.h
 -
+pthread.h
+-
 wiringPi.h
 -
 wiringSerial.h
+-
+thread
+-
+mutex
 -
 
 /usr/local/include/opencv/cxcore.h

@@ -7,16 +7,22 @@
 #include <string.h>
 #include <errno.h>
 
+#include <pthread.h>
+
+#include <wiringPi.h>
+#include <wiringSerial.h>
+
 #include <thread>
 #include <mutex>
 
 using namespace std;
 using namespace cv;
-
-std::mutex mtx;
-
 using ns = chrono::nanoseconds;
 using get_time = chrono::steady_clock;
+
+
+
+
 
 int hLow = 160;
 int hHigh = 179;
@@ -31,8 +37,8 @@ int baudrate = 9600;
 string head = "S ";
 string sufix = "A";
 
-Mat cut;
-Mat hsv, hsvOut;//maybe use volatile
+mutex mtx;
+Mat cut,hsv,hsvOut;
 
 void get_cut(VideoCapture& cap, Mat& img)
 {
@@ -45,20 +51,20 @@ void get_cut(VideoCapture& cap, Mat& img)
 		}
 		if (mtx.try_lock())
 		{
-			cut = img(Rect(160, 120, 320, 240));
+			cut = img(Rect(160, 0, 320, 480));
 			mtx.unlock();
 		}
 	}
 }
 
-void process(bool ifshow)
+void process(int fd, bool ifshow)
 {
 	while (true)
 	{
 		auto t0 = get_time::now();
 		if (mtx.try_lock())
 		{
-			if (cut.rows == 240)
+			if (cut.cols == 320)
 			{
 				cvtColor(cut, hsv, CV_BGR2HSV);
 				mtx.unlock();
@@ -106,6 +112,7 @@ void process(bool ifshow)
 		string message = head + to_string(px) + ' ' + to_string(py) + ' ' + to_string(cnt) + sufix;
 		const char* str1 = message.c_str();
 		char* str = const_cast<char*>(str1);
+		serialPuts(fd,str);
 		if (ifshow)
 		{
 			cvtColor(hsvOut, hsvOut, CV_GRAY2BGR);
@@ -125,9 +132,21 @@ void process(bool ifshow)
 	}
 }
 
-
 int main(int argc, char** argv)
 {
+	int fd;
+	if((fd = serialOpen(device, baudrate)) < 0)
+    	{
+        	cerr << "Unable to open serial device" << endl;
+	        return -1;
+    	}
+    
+    	if (wiringPiSetup () == -1)
+    	{
+	        cerr << "Unable to start wiringPi" << endl;
+	        return 1 ;
+	}
+
 	bool ifshow = (argc > 1);
 	auto cap = VideoCapture(0);
 	cap.set(CV_CAP_PROP_XI_WIDTH, 640);
@@ -144,10 +163,13 @@ int main(int argc, char** argv)
 	cout << "rows: " << src.rows << " , cols: " << src.cols << endl;
 
 	thread t0 = thread(get_cut, std::ref(cap), std::ref(src));
-	thread t1 = thread(process, ifshow);
+	thread t1 = thread(process, fd, ifshow);
 	t0.join();
 	t1.join();
 
-	//system("pause");
 	return 0;
+
+
+
+
 }

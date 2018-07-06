@@ -7,6 +7,8 @@
 #include <string.h>
 #include <errno.h>
 
+#include <pthread.h>
+
 #include <wiringPi.h>
 #include <wiringSerial.h>
 
@@ -35,6 +37,11 @@ string sufix = "A";
 
 int main(int argc, char** argv)
 {
+	cpu_set_t mask;
+	CPU_ZERO(&mask);
+	CPU_SET(3,&mask);
+	if(sched_setaffinity(0,sizeof(mask),&mask)==-1)
+		cout << "affi set fail!" << endl;
 
         int fd;
 	if((fd = serialOpen(device, baudrate)) < 0)
@@ -52,7 +59,10 @@ int main(int argc, char** argv)
 
 	Mat src, hsv, hsvOut;
 	auto cap = VideoCapture(0);
-	//cap.set(CV_CAP_PROP_EXPOSURE, -9);
+	//cap.set(CV_CAP_PROP_EXPOSURE, -8);
+	cap.set(CV_CAP_PROP_FRAME_WIDTH,640);
+	cap.set(CV_CAP_PROP_FRAME_HEIGHT,480);
+	
 	if (!cap.isOpened())
 	{
 		cerr << "can not open camera!" << endl;
@@ -71,16 +81,23 @@ int main(int argc, char** argv)
 		{
 			cerr << "blank frame grabbed" << endl;
 		}
+
+		auto t_temp_0 = get_time::now();
+		src = src(Rect(160,120,320,240));
+		auto t_temp_1 = get_time::now();
+		auto diff_temp = t_temp_1-t_temp_0;
+		cout << "roi time: " << chrono::duration_cast<ns>(diff_temp).count() << endl;
+			
 		
-		auto t1 = get_time::now();
+		/*auto t1 = get_time::now();
 		auto diff = t1-t0;
-		cout << "get image: " << chrono::duration_cast<ns>(diff).count() << endl;
+		cout << "get image: " << chrono::duration_cast<ns>(diff).count() << endl;*/
 
 		cvtColor(src, hsv, CV_BGR2HSV);
 		inRange(hsv, Scalar(hLow, sLow, vLow), Scalar(hHigh, sHigh, vHigh), hsvOut);
-		auto t2 = get_time::now();
+		/*auto t2 = get_time::now();
 		diff = t2-t1;
-		cout << "hsv and inrange: " << chrono::duration_cast<ns>(diff).count() << endl;
+		cout << "hsv and inrange: " << chrono::duration_cast<ns>(diff).count() << endl;*/
 		//形态学可以不做，节省运算资源，尤其是第二步。
 		//除去小物体
 		//erode(hsvOut, hsvOut, getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
@@ -88,9 +105,9 @@ int main(int argc, char** argv)
 		//除去小孔
 		//dilate(hsvOut, hsvOut, getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
 		//erode(hsvOut, hsvOut, getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
-		auto t3 = get_time::now();
+		/*auto t3 = get_time::now();
 		diff = t3-t2;
-		cout << "erode and dilated: " << chrono::duration_cast<ns>(diff).count() << endl;
+		cout << "erode and dilated: " << chrono::duration_cast<ns>(diff).count() << endl;*/
 
 		//中心点(px,py),像素点数量cnt
 		int cols = hsvOut.cols;
@@ -110,11 +127,11 @@ int main(int argc, char** argv)
 				}
 			}
 		}
-		auto t4 = get_time::now();
+		/*auto t4 = get_time::now();
 		diff = t4-t3;
-		cout << "pixel opration: " << chrono::duration_cast<ns>(diff).count() << endl;
-		cout << cnt << endl;
-		if (cnt > 10)
+		cout << "pixel opration: " << chrono::duration_cast<ns>(diff).count() << endl;*/
+		
+		if (cnt > 3)
 		{
 			px /= cnt;
 			py /= cnt;
@@ -126,14 +143,18 @@ int main(int argc, char** argv)
 			py = 0;
 			cnt = 0;
 		}
+		cout << "point Num: " << fd << endl;
+		cout << "px: " << px << endl;
+		cout << "py: " << py << endl;
 		string message = head + to_string(px)+' '+to_string(py)+' '+to_string(cnt)+sufix;
 		const char* str1 = message.c_str();
 		char* str = const_cast<char*>(str1);
 		serialPuts(fd,str);
-		auto t5 = get_time::now();
+		/*auto t5 = get_time::now();
 		diff = t5-t4;
-		cout << "serial opration: " << chrono::duration_cast<ns>(diff).count() << endl;
-		diff = t5-t0;
+		cout << "serial opration: " << chrono::duration_cast<ns>(diff).count() << endl;*/
+		auto t5 = get_time::now();
+		auto diff = t5-t0;
 		cout << "basic operation: " << chrono::duration_cast<ns>(diff).count() << endl;
 		
 		if(argc>1)
@@ -149,9 +170,9 @@ int main(int argc, char** argv)
 				break;
 			}
 		}
-		auto t6 = get_time::now();
+		/*auto t6 = get_time::now();
 		diff = t6-t0;
-		cout << "add imshow operation: " << chrono::duration_cast<ns>(diff).count() << endl;
+		cout << "add imshow operation: " << chrono::duration_cast<ns>(diff).count() << endl;*/
 
 
 	}

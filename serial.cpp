@@ -5,6 +5,7 @@
 
 #include <wiringPi.h>
 #include <wiringSerial.h>
+#include <time.h>
 
 using namespace std;
 
@@ -14,6 +15,7 @@ int main()
     int baudrate = 9600;
     int fd;
     string head = "S ";
+    string sufix = "A";
 
     if((fd = serialOpen(device, baudrate)) < 0)
     {
@@ -30,13 +32,15 @@ int main()
     int px = 320;
     int py = 240;
     int pointNum = 66729;
-    string message = head + to_string(px)+' '+to_string(py)+' '+to_string(pointNum);
+    string message = head + to_string(px)+' '+to_string(py)+' '+to_string(pointNum)+sufix;
     //string message = to_string(px);
     const char* str1 = message.c_str();
     char* str = const_cast<char*>(str1);
-    for(int i = 0; i < 100; i++)
+    while(true)
     {
         serialPuts(fd,str);
+	//usleep(100);
+	cout << str <<endl;	
     }
     serialClose(fd);
 }
