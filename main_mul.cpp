@@ -20,10 +20,7 @@ using namespace cv;
 using ns = chrono::nanoseconds;
 using get_time = chrono::steady_clock;
 
-
-
-
-
+//设置hsv范围
 int hLow = 160;
 int hHigh = 179;
 int sLow = 100;
@@ -31,15 +28,18 @@ int sHigh = 255;
 int vLow = 128;
 int vHigh = 255;
 
+//设置串口及波特率
 const char* device = "/dev/ttyUSB0";
 int baudrate = 9600;
-
+//起止符
 string head = "S ";
 string sufix = "A";
-
+//线程锁
 mutex mtx;
+//全局Mat
 Mat cut,hsv,hsvOut;
 
+//线程0，从相机获取图像并裁剪
 void get_cut(VideoCapture& cap, Mat& img)
 {
 	while (true)
@@ -51,12 +51,15 @@ void get_cut(VideoCapture& cap, Mat& img)
 		}
 		if (mtx.try_lock())
 		{
+			//图像裁剪，这里裁剪成320*480，可以根据需要裁剪，甚至不裁剪
 			cut = img(Rect(160, 0, 320, 480));
+			//cut = img(Rect(160, 120, 320, 240));
 			mtx.unlock();
 		}
 	}
 }
 
+//线程1，红灯识别
 void process(int fd, bool ifshow)
 {
 	while (true)
@@ -64,7 +67,7 @@ void process(int fd, bool ifshow)
 		auto t0 = get_time::now();
 		if (mtx.try_lock())
 		{
-			if (cut.cols == 320)
+			if (cut.cols >1)
 			{
 				cvtColor(cut, hsv, CV_BGR2HSV);
 				mtx.unlock();
@@ -81,9 +84,9 @@ void process(int fd, bool ifshow)
 		inRange(hsv, Scalar(hLow, sLow, vLow), Scalar(hHigh, sHigh, vHigh), hsvOut);
 		int cols = hsvOut.cols;
 		int rows = hsvOut.rows;
-		int px = 0;
-		int py = 0;
-		int cnt = 0;
+		int px = 0;//红灯中心点x坐标
+		int py = 0;//红灯中心点y坐标
+		int cnt = 0;//红灯像素数量
 		for (int col = 0; col < cols; col++)
 		{
 			for (int row = 0; row < rows; row++)
@@ -111,8 +114,9 @@ void process(int fd, bool ifshow)
 		}
 		string message = head + to_string(px) + ' ' + to_string(py) + ' ' + to_string(cnt) + sufix;
 		const char* str1 = message.c_str();
-		char* str = const_cast<char*>(str1);
+		char* str = const_cast<char*>(str1);//通过串口发送的数据
 		serialPuts(fd,str);
+		//显示图像
 		if (ifshow)
 		{
 			cvtColor(hsvOut, hsvOut, CV_GRAY2BGR);
@@ -151,6 +155,7 @@ int main(int argc, char** argv)
 	auto cap = VideoCapture(0);
 	cap.set(CV_CAP_PROP_XI_WIDTH, 640);
 	cap.set(CV_CAP_PROP_XI_HEIGHT, 480);
+	//树莓派中好像不能设置相机的曝光参数，我是在windows中用下一句设置后，在树莓派中注释下一句，即可正常使用。-10是针对相机调整出来的，不同相机不一样，要调试。
 	//cap.set(CV_CAP_PROP_EXPOSURE, -10);
 	if (!cap.isOpened())
 	{
@@ -162,14 +167,11 @@ int main(int argc, char** argv)
 	cap >> src;
 	cout << "rows: " << src.rows << " , cols: " << src.cols << endl;
 
+	//开启两个线程
 	thread t0 = thread(get_cut, std::ref(cap), std::ref(src));
 	thread t1 = thread(process, fd, ifshow);
 	t0.join();
 	t1.join();
 
 	return 0;
-
-
-
-
 }
