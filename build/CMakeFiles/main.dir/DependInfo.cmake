@@ -4,7 +4,7 @@ set(CMAKE_DEPENDS_LANGUAGES
   )
 # The set of files for implicit dependencies of each language:
 set(CMAKE_DEPENDS_CHECK_CXX
-  "/home/code/TurnOffLight/main_mul.cpp" "/home/code/TurnOffLight/build/CMakeFiles/main.dir/main_mul.cpp.o"
+  "/home/pi/raspberry/TurnOffLight/main_mul.cpp" "/home/pi/raspberry/TurnOffLight/build/CMakeFiles/main.dir/main_mul.cpp.o"
   )
 set(CMAKE_CXX_COMPILER_ID "GNU")
 

@@ -6,7 +6,7 @@
 
 #IncludeRegexTransform: 
 
-/home/code/TurnOffLight/main_mul.cpp
+/home/pi/raspberry/TurnOffLight/main_mul.cpp
 opencv2/opencv.hpp
 -
 opencv2/highgui.hpp

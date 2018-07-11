@@ -52,6 +52,7 @@ void get_cut(VideoCapture& cap, Mat& img)
 		if (mtx.try_lock())
 		{
 			cut = img(Rect(160, 0, 320, 480));
+			//cut = img(Rect(160, 120, 320, 240));
 			mtx.unlock();
 		}
 	}
