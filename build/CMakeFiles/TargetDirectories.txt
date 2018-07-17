@@ -1,3 +1,0 @@
-/home/code/TurnOffLight/build/CMakeFiles/rebuild_cache.dir
-/home/code/TurnOffLight/build/CMakeFiles/edit_cache.dir
-/home/code/TurnOffLight/build/CMakeFiles/main.dir

@@ -1,3 +1,9 @@
+/*
+@author hxx
+@email	hxx_zju@zju.edu.cn
+@date	2018/07/17
+@brief	rgbÕºœÒ”√”⁄ºÏ≤‚∫Ïµ∆£¨irÕºœÒ”√”⁄ºÏ≤‚’œ∞≠ŒÔ£¨
+*/
 #include <opencv2/opencv.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -7,43 +13,351 @@
 #include <string.h>
 #include <errno.h>
 
-#include <pthread.h>
-
 #include <wiringPi.h>
 #include <wiringSerial.h>
+
+#include <pthread.h>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include "myv4l2.hpp"
 
 using namespace std;
 using namespace cv;
 using ns = chrono::nanoseconds;
+using Ms = std::chrono::milliseconds;
 using get_time = chrono::steady_clock;
 
-
-//#define showImg
-
-
+//…Ë÷√rgbÕºœÒ∫ÕirÕºœÒµƒ¥Û–°£¨“‘º∞∂‘”¶œ‡ª˙µƒ∆ÿπ‚ ±º‰£¨rgbExp=1∂‘”¶…Ë÷√rgbÕºœÒ∆ÿπ‚ ±º‰Œ™0.1ms£¨∆ÿπ‚ ±º‰∏˘æ›œ‡ª˙µ˜’˚
+#define rgbW 640
+#define rgbH 480
+#define rgbExp 15
+#define irW 320
+#define irH 240
+#define irExp 20
+//…Ë÷√4∏ˆœﬂ≥Ãµƒ ±º‰º‰∏Ù£¨”…”⁄ ˜›Æ≈…–‘ƒ‹œﬁ÷∆£¨ µº ÷µ>=…Ë∂®÷µ
+#define rgbGetInterval 15	//rgbÕºœÒ ‰»Î ±º‰º‰∏Ù15ms
+#define irGetInterval 15	
+#define rgbProInterval 25	//rgbÕºœÒ¥¶¿Ì ±º‰º‰∏ÙŒ™25ms
+#define irProInterval 25
+//∫Ïµ∆hsv∑÷∏Ó„–÷µ
 int hLow = 160;
 int hHigh = 179;
 int sLow = 100;
 int sHigh = 255;
 int vLow = 128;
 int vHigh = 255;
-
+//¥Æø⁄…Ë±∏–≈œ¢
 const char* device = "/dev/ttyUSB0";
 int baudrate = 9600;
-
+//∫Ïµ∆ºÏ≤‚∫Õ’œ∞≠ŒÔºÏ≤‚µƒ±Í÷æ–≈œ¢
 string head = "S ";
 string sufix = "A";
+string head_ir = "T";
+string sufix_ir = "B";
+//œﬂ≥ÃÀ¯
+timed_mutex mtx, mtx_ir, mtx_usb;
+condition_variable conval_rgb, conval_ir;
+//ÕºœÒ±Í÷æŒª£¨ture±Ì æ¥”…„œÒÕ∑ªÒ»°¡À“ª÷°ÕºœÒ£¨¥¶¿Ì∫Û±ª÷√Œ™false
+bool flag_rgb = false, flag_ir = false;
+//bool if_rgb_ok() {return flag_rgb;}
+//bool if_ir_ok() {return flag_ir;}
+Mat cut,hsv,hsvOut;
+Mat cut_ir;
+// ±º‰œ‡πÿ
+auto t0 = get_time::now();
+auto t0_ir = get_time::now();
+auto t0_get = get_time::now();
+auto t0_ir_get = get_time::now();
+//v4l2  ”∆µªÒ»°
+unsigned char *RGBframe = NULL;
+unsigned char *IRframe = NULL;
+unsigned long RGBframeSize = 0;
+unsigned long IRframeSize = 0;
+Mat matRGB, matIR;
+//ªÒ»°rgbÕºœÒ£¨¥Û–°£∫640*380£¨ø…∏˘æ›–Ë“™–ﬁ∏ƒ
+void get_cut(V4L2Capture& cap, Mat& img)
+{
+	unique_lock<timed_mutex> lock(mtx, defer_lock);
+	while (true)
+	{
+		if(!flag_rgb)
+		{
+			if (lock.try_lock())
+			{
+				cap.getFrame((void **) &RGBframe, (size_t *)&RGBframeSize);
+				matRGB = Mat(rgbW,rgbH,CV_8UC3,(void*)RGBframe);
+				img = imdecode(matRGB,1);
+				
+				if (img.empty())
+				{
+					cerr << "blank frame grabbed" << endl;
+					cap.backFrame();
+	
+					lock.unlock();
+					continue;
+				}
+				cap.backFrame();
+				cut = img(Rect(0, 100, 640, 380));
+				//cut = img.clone();
+				flag_rgb = true;
+				lock.unlock();
+				auto diff = get_time::now() - t0_get;
+				//œﬁ÷∆÷°¬ 
+				if(chrono::duration_cast<Ms>(diff) < Ms(rgbGetInterval))
+					this_thread::sleep_for(Ms(rgbGetInterval)-chrono::duration_cast<Ms>(diff));
+				
+				//diff = get_time::now() - t0_get;
+				//cout << "rgb get and cut image: " << chrono::duration_cast<Ms>(diff).count() << endl;
+				t0_get = get_time::now();
+				
+			}
+		}
+		
+	}
+}
+//ªÒ»°irÕºœÒ£¨¥Û–°£∫640*480
+void get_cut_ir(V4L2Capture& cap, Mat& img)
+{
+	unique_lock<timed_mutex> lock(mtx_ir, defer_lock);
+	while (true)
+	{
+		//cout << "ir while" << endl;
+		if (lock.try_lock())
+		{
+			cap.getFrame((void **) &IRframe, (size_t *)&IRframeSize);
+			matIR = Mat(irW,irH,CV_8UC3,(void*)IRframe);
+			img = imdecode(matIR,1);//directly get gray image
+			//cout << img.cols << endl;
+			//cap >> img;
+			if (img.empty())
+			{
+				cerr << "blank frame grabbed" << endl;
+				cap.backFrame();
 
+				lock.unlock();
+				continue;
+			}
+			//cout << "check ir image: " << img.cols << "   " << img.rows << endl;
+			cap.backFrame();
+			//cut_ir = img(Rect(0, 0, 640, 480));
+			cut_ir = img.clone();
+			//resize(img,cut_ir,Size(320,240));
+			flag_ir = true;
+			lock.unlock();
+			auto diff = get_time::now() - t0_ir_get;
+			if(chrono::duration_cast<Ms>(diff) < Ms(irGetInterval))
+				this_thread::sleep_for(Ms(irGetInterval)-chrono::duration_cast<Ms>(diff));
+			//cout << "ir get and cut image: " << chrono::duration_cast<Ms>(diff).count() << endl;
+			//diff = get_time::now() - t0_ir_get;
+			//cout << "ir get and cut image: " << chrono::duration_cast<Ms>(diff).count() << endl;
+			t0_ir_get = get_time::now();
+		}
+		
+	}
+}
+//rgbÕºœÒ¥¶¿Ì£¨µ√µΩ∫Ïµ∆◊¯±Í∫Õ¥Û–°£¨Õ®π˝¥Æø⁄ ‰≥ˆ£¨œ‘ æÕºœÒªπ”–bug
+void process(int fd, bool ifshow)
+{
+	unique_lock<timed_mutex> lock(mtx, defer_lock);
+	unique_lock<timed_mutex> lock_usb(mtx_usb, defer_lock);
+	vector<vector<cv::Point>> contours;
+	
+	while (true)
+	{
+		if(flag_rgb)
+		{	
+			if (mtx.try_lock_for(Ms(8)))
+			{
+				flag_rgb = false;
+				if (!cut.empty() && cut.data)
+				{					
+					cvtColor(cut, hsv, COLOR_BGR2HSV);
+					mtx.unlock();
+				}
+				else
+				{
+					mtx.unlock();
+					continue;
+				}
+				
+	
+			}
+		}
+		if (hsv.cols == 0) continue;
+		//flag_rgb = false;
+		inRange(hsv, Scalar(hLow, sLow, vLow), Scalar(hHigh, sHigh, vHigh), hsvOut);
+		int cols = hsvOut.cols;
+		int rows = hsvOut.rows;
+		int px = 0;
+		int py = 0;
+		int cnt = 0;
+		//auto t0_temp = get_time::now();
+		findContours(hsvOut, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE);	//ªÒ»°∫Ïµ∆¬÷¿™
+		Moments mu;
+		//Point2f mc;
+		//◊Ó¥Ûµƒ¬÷¿™¥˙±Ì∫Ïµ∆£¨º∆À„∫Ïµ∆÷ –ƒ∫ÕœÒÀÿ ˝¡ø
+		double maxArea = 0;
+		for (size_t i = 0; i < contours.size(); i++)
+		{
+			double tmpArea = contourArea(contours[i]);
+			if(tmpArea > maxArea)
+			{
+				maxArea = tmpArea;
+				mu = moments(contours[i], false);
+				//mc = Point2f(mu.m10 / mu.m00, mu.m01 / mu.m00);
+				px = mu.m10 / mu.m00;
+				py = mu.m01 / mu.m00;
+			}
+		}
+		//auto t1_temp = get_time::now();
+		//auto diff_temp = t1_temp-t0_temp;
+		//cout << "my operation: " << chrono::duration_cast<Ms>(diff_temp).count() << endl;
+		cnt = maxArea;
+		//cout << cnt << endl;
+		//◊Ó–°œÒÀÿ ˝¡ø=8
+		if(cnt < 8)
+		{
+			px = 0;
+			py = 0;
+			cnt = 0;
+		}
+		else
+		{
+			//px += 50;
+			py += 100;
+		}
+		//¥Æø⁄ ˝æ›∑¢ÀÕ
+		string message = head + to_string(px) + ' ' + to_string(py) + ' ' + to_string(cnt) + sufix;
+		const char* str1 = message.c_str();
+		char* str = const_cast<char*>(str1);
+		if(lock_usb.try_lock_for(std::chrono::milliseconds(2)))
+		{
+			serialPuts(fd,str);
+			lock_usb.unlock();
+		}
+		//œ‘ ærgb¥¶¿ÌΩ·π˚£¨”–bug
+		if (ifshow)
+		{
+			cvtColor(hsvOut, hsvOut, CV_GRAY2BGR);
+			if (cnt > 8)
+				circle(hsvOut, Point(px, py-100), 5, Scalar(0, 0, 255), 5);
+			imshow("preview", hsvOut);
+			//imshow("cut", cut);
+			char c = waitKey(1);
+			if (c == 27)
+			{
+				break;
+			}
+		}
+		cout << message << endl;
+		//auto t6 = get_time::now();
+		auto diff = get_time::now() - t0;
+		//œﬁ÷∆÷°¬ 
+		if(chrono::duration_cast<Ms>(diff) < Ms(rgbProInterval))
+				this_thread::sleep_for(Ms(rgbProInterval)-chrono::duration_cast<Ms>(diff));
+		
+		diff = get_time::now() - t0;
+		cout << "rgb time per image: " << chrono::duration_cast<Ms>(diff).count() << endl;
+		t0 = get_time::now();
+	}
+	//usleep(20000);
+}
+//¥¶¿ÌirÕºœÒ£¨ªÒµ√’œ∞≠ŒÔ–≈œ¢£¨∑¢ÀÕ’œ∞≠ŒÔµƒŒª÷√∫ÕøÌ∂»£¨¿Ì¬€…œ’‚∏ˆœﬂ≥Ãª·”–bug£¨ µº »∑ µ”–
+//todo –ﬁ∏¥bug
+void process_ir(int fd, bool ifshow)
+{
+	unique_lock<timed_mutex> lock(mtx_ir, defer_lock);
+	unique_lock<timed_mutex> lock_usb(mtx_usb, defer_lock);
+	//√˚◊÷»°µƒ≤ª∫√£¨ µº …œ «◊Ó–°µƒ±ª»œŒ™ «’œ∞≠ŒÔµƒœÒÀÿøÈ¥Û–°°£°£°£°£°£°£ºı–°¥À≤Œ ˝ø…“‘‘ˆº”ºÏ≤‚æ‡¿Î£¨Ã·∏ﬂ¡È√Ù∂»£¨Ã´–°ª·≥ˆ–˛—ßbug≈∂
+	double maxArea = 40;
+	int px = 0;
+	int py = 0;
+	int width = 0;
+	Mat gray, erodeImg, bwImg;
+	vector<vector<cv::Point>> contours;
+	while(true)
+	{
+		//t0_ir = get_time::now();
+		if (mtx_ir.try_lock_for(Ms(8)) && flag_ir)
+		{
+			flag_ir = false;
+			cout << cut_ir.cols << endl;
+			if (cut_ir.cols > 0)
+			{
+				cvtColor(cut_ir, gray, CV_BGR2GRAY);
+				//gray = cut_ir.clone();
+				//imshow("cut_ir",cut_ir);
+				mtx_ir.unlock();
+			}
+			else
+			{
+				mtx_ir.unlock();
+				continue;
+			}
+		}
+		else
+		{
+			mtx_ir.unlock();
+			continue;
+		}
+		
+		if(gray.cols == 0) continue;
+		//flag_ir = false;
+		//∂˛÷µªØ£¨„–÷µ”Î∆ÿπ‚ ±º‰…Ë÷√”–πÿ
+		threshold(gray, bwImg, 50, 255, THRESH_BINARY);//threshold image
+		//∏Ø ¥
+		erode(bwImg, erodeImg, getStructuringElement(MORPH_ELLIPSE, Size(3, 3)));//erode	
+		//’“¬÷¿™
+		cv::findContours(erodeImg, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE);
+		//±Í”– ****************** µƒ∂ºø…“‘»•µÙ£¨ΩˆÕºœÒœ‘ æ”√
+		Mat result;//******************
+		cvtColor(gray,result,CV_GRAY2BGR);//******************
+		string message = head_ir;
+		//’“µΩÀ˘”–ø…ƒ‹ «’œ∞≠ŒÔµƒ∂´Œ˜
+		for (size_t i = 0; i < contours.size(); i++)
+		{
+			//cout << contourArea(contours[i]) << endl;
+			if (contourArea(contours[i]) > maxArea)
+			{
+				cv::Rect r = cv::boundingRect(contours[i]);
+				px = r.x*2 + r.width; py = r.y*2 + r.height; width = r.width*2;
+				message += ' ' + to_string(px) + ' ' + to_string(py) + ' ' + to_string(width);
+				
+				cv::rectangle(result, r, cv::Scalar(0,0,255));//******************
+			}
+		}
+		
+		//imshow("bwImg",erodeImg);//******************
+		if(ifshow)
+		{
+			imshow("result",result);//******************
+			waitKey(1);//******************
+		}
+		message += sufix_ir;
+		const char* str1 = message.c_str();
+		char* str = const_cast<char*>(str1);
+		if(lock_usb.try_lock_for(std::chrono::milliseconds(2)))
+		{
+			serialPuts(fd,str);
+			lock_usb.unlock();
+		}
+		cout << message << endl;
+
+		auto diff = get_time::now() - t0_ir;
+		
+		if(chrono::duration_cast<Ms>(diff) < Ms(irProInterval))
+				this_thread::sleep_for(Ms(irProInterval)-chrono::duration_cast<Ms>(diff));
+		diff = get_time::now() - t0_ir;
+		cout << "ir time per image: " << chrono::duration_cast<Ms>(diff).count() << endl;
+		t0_ir = get_time::now();
+	}
+}
 
 int main(int argc, char** argv)
 {
-	cpu_set_t mask;
-	CPU_ZERO(&mask);
-	CPU_SET(3,&mask);
-	if(sched_setaffinity(0,sizeof(mask),&mask)==-1)
-		cout << "affi set fail!" << endl;
-
-        int fd;
+	//¥Æø⁄…Ë÷√
+	int fd;
 	if((fd = serialOpen(device, baudrate)) < 0)
     	{
         	cerr << "Unable to open serial device" << endl;
@@ -54,129 +368,72 @@ int main(int argc, char** argv)
     	{
 	        cerr << "Unable to start wiringPi" << endl;
 	        return 1 ;
-	}	
-
-
-	Mat src, hsv, hsvOut;
-	auto cap = VideoCapture(0);
-	//cap.set(CV_CAP_PROP_EXPOSURE, -8);
-	cap.set(CV_CAP_PROP_FRAME_WIDTH,640);
-	cap.set(CV_CAP_PROP_FRAME_HEIGHT,480);
-	
-	if (!cap.isOpened())
+	}
+	//show ¥´1∏ˆ≤Œ ˝œ‘ ærgbΩ·π˚£¨¥´¡Ω∏ˆ≤Œ ˝œ‘ æir¥¶¿ÌΩ·π˚
+	bool ifshow, ifshow_ir;
+	if(argc==2)
 	{
-		cerr << "can not open camera!" << endl;
-		return -1;
+		ifshow = 1;
+		ifshow_ir = 0;
 	}
-
-	cap >> src;
-	cout << "rows: " << src.rows << " , cols: " << src.cols << endl;
-
-	//namedWindow("preview");
-	while (true)
-	{	
-		auto t0 = get_time::now();
-		cap >> src;
-		if (src.empty())
-		{
-			cerr << "blank frame grabbed" << endl;
-		}
-
-		auto t_temp_0 = get_time::now();
-		src = src(Rect(160,120,320,240));
-		auto t_temp_1 = get_time::now();
-		auto diff_temp = t_temp_1-t_temp_0;
-		cout << "roi time: " << chrono::duration_cast<ns>(diff_temp).count() << endl;
-			
-		
-		/*auto t1 = get_time::now();
-		auto diff = t1-t0;
-		cout << "get image: " << chrono::duration_cast<ns>(diff).count() << endl;*/
-
-		cvtColor(src, hsv, CV_BGR2HSV);
-		inRange(hsv, Scalar(hLow, sLow, vLow), Scalar(hHigh, sHigh, vHigh), hsvOut);
-		/*auto t2 = get_time::now();
-		diff = t2-t1;
-		cout << "hsv and inrange: " << chrono::duration_cast<ns>(diff).count() << endl;*/
-		//ÂΩ¢ÊÄÅÂ≠¶ÂèØ‰ª•‰∏çÂÅöÔºåËäÇÁúÅËøêÁÆóËµÑÊ∫êÔºåÂ∞§ÂÖ∂ÊòØÁ¨¨‰∫åÊ≠•„ÄÇ
-		//Èô§ÂéªÂ∞èÁâ©‰Ωì
-		//erode(hsvOut, hsvOut, getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
-		//dilate(hsvOut, hsvOut, getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
-		//Èô§ÂéªÂ∞èÂ≠î
-		//dilate(hsvOut, hsvOut, getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
-		//erode(hsvOut, hsvOut, getStructuringElement(MORPH_ELLIPSE, Size(5, 5)));
-		/*auto t3 = get_time::now();
-		diff = t3-t2;
-		cout << "erode and dilated: " << chrono::duration_cast<ns>(diff).count() << endl;*/
-
-		//‰∏≠ÂøÉÁÇπ(px,py),ÂÉèÁ¥†ÁÇπÊï∞Èáècnt
-		int cols = hsvOut.cols;
-		int rows = hsvOut.rows;
-		int px = 0;
-		int py = 0;
-		int cnt = 0;
-		for (int col = 0; col < cols; col++)
-		{
-			for (int row = 0; row < rows; row++)
-			{
-				if (hsvOut.at<uchar>(cv::Point(col, row)) == 255)
-				{
-					px += col;
-					py += row;
-					cnt++;
-				}
-			}
-		}
-		/*auto t4 = get_time::now();
-		diff = t4-t3;
-		cout << "pixel opration: " << chrono::duration_cast<ns>(diff).count() << endl;*/
-		
-		if (cnt > 3)
-		{
-			px /= cnt;
-			py /= cnt;
-			
-		}
-		else
-		{
-			px = 0;
-			py = 0;
-			cnt = 0;
-		}
-		cout << "point Num: " << fd << endl;
-		cout << "px: " << px << endl;
-		cout << "py: " << py << endl;
-		string message = head + to_string(px)+' '+to_string(py)+' '+to_string(cnt)+sufix;
-		const char* str1 = message.c_str();
-		char* str = const_cast<char*>(str1);
-		serialPuts(fd,str);
-		/*auto t5 = get_time::now();
-		diff = t5-t4;
-		cout << "serial opration: " << chrono::duration_cast<ns>(diff).count() << endl;*/
-		auto t5 = get_time::now();
-		auto diff = t5-t0;
-		cout << "basic operation: " << chrono::duration_cast<ns>(diff).count() << endl;
-		
-		if(argc>1)
-		{
-			cvtColor(hsvOut, hsvOut, CV_GRAY2BGR);
-			if(cnt>10)
-				circle(hsvOut, Point(px, py), 5, Scalar(0, 0, 255), 5);
-			imshow("preview", hsvOut);
-			imshow("src",src);
-			char c = waitKey(1);
-			if (c == 27)
-			{
-				break;
-			}
-		}
-		/*auto t6 = get_time::now();
-		diff = t6-t0;
-		cout << "add imshow operation: " << chrono::duration_cast<ns>(diff).count() << endl;*/
-
-
+	else if(argc == 3)
+	{
+		ifshow = 0;
+		ifshow_ir = 1;
 	}
+	else
+	{
+		ifshow = 0;
+		ifshow_ir = 0;
+	}
+	//device path£¨œ‡µ±”⁄…Ë±∏µƒ√˚◊÷£¨≤Èø¥∑Ω Ωº˚README.txt£¨∫‹πÿº¸£°£°£°£°£°£°£°£°£°£°£°£°£°£°£°
+	string deviceRGB = "/dev/v4l/by-path/platform-3f980000.usb-usb-0:1.2:1.0-video-index0";
+	string deviceIR = "/dev/v4l/by-path/platform-3f980000.usb-usb-0:1.4:1.0-video-index0";
+	/*********************RGB capture******************/
+	V4L2Capture capRGB(const_cast<char*>(deviceRGB.c_str()), rgbW, rgbH, rgbExp);//set lowest exposure
+	capRGB.openDevice();
+	capRGB.initDevice();
+	capRGB.startCapture();
+	/*********************RGB capture******************/
+	V4L2Capture capIR(const_cast<char*>(deviceIR.c_str()), irW, irH, irExp);
+	capIR.openDevice();
+	capIR.initDevice();
+	capIR.startCapture();
+
+	//¥Ú”°ÕºœÒ–≈œ¢
+	Mat src, src_ir;
+	cout << "display image property" << endl;
+	while (capRGB.getFrame((void **)&RGBframe, (size_t *)&RGBframeSize) == -1) capRGB.backFrame();
+	matRGB = Mat(rgbW,rgbH,CV_8UC3,(void*)RGBframe);
+	src = imdecode(matRGB,1);
+	imwrite("src.png",src);
+	cout << "RGB image property -- rows: " << src.rows << " , cols: " << src.cols << endl;
+	capRGB.backFrame();
+	cout << "**********************************" << endl;
+	while (capIR.getFrame((void **)&IRframe, (size_t *)&IRframeSize) == -1) capIR.backFrame();
+	matIR = Mat(irW,irH,CV_8UC3,(void*)RGBframe);
+	src = imdecode(matRGB,1);//directly get gray image
+	cout << "IR image property -- rows: " << src_ir.rows << " , cols: " << src_ir.cols << endl;
+	capIR.backFrame();
 	
-	serialClose(fd);
+	//∑÷± «ªÒ»°rgb°¢¥¶¿Ìrgb°¢ªÒ»°ir°¢¥¶¿Ìirœﬂ≥Ã£¨≤ª–Ë“™ø…“‘◊¢ Õ“ª≤ø∑÷
+	thread t0 = thread(get_cut, std::ref(capRGB), std::ref(src));
+	thread t1 = thread(process, fd, ifshow);
+	thread t0_ir = thread(get_cut_ir, std::ref(capIR), std::ref(src_ir));
+	thread t1_ir = thread(process_ir, fd, ifshow_ir);
+
+	t0.join();
+	t1.join();
+	t0_ir.join();
+	t1_ir.join();
+	// Õ∑≈œ‡ª˙£¨∆‰ µ√ª…∂”√£¨π˛π˛£®°™_°™£°£©
+	capRGB.stopCapture();
+	capRGB.freeBuffers();
+	capRGB.closeDevice();
+	capIR.stopCapture();
+	capIR.freeBuffers();
+	capIR.closeDevice();
+
 	return 0;
+
 }
