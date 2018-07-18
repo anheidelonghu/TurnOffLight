@@ -389,6 +389,8 @@ int main(int argc, char** argv)
 	//device path，相当于设备的名字，查看方式见README.txt，很关键！！！！！！！！！！！！！！！
 	string deviceRGB = "/dev/v4l/by-path/platform-3f980000.usb-usb-0:1.2:1.0-video-index0";
 	string deviceIR = "/dev/v4l/by-path/platform-3f980000.usb-usb-0:1.4:1.0-video-index0";
+	//使用树莓派摄像头需要运行命令，见REAMME.md
+	//string deviceIR = "/dev/video0"
 	/*********************RGB capture******************/
 	V4L2Capture capRGB(const_cast<char*>(deviceRGB.c_str()), rgbW, rgbH, rgbExp);//set lowest exposure
 	capRGB.openDevice();

@@ -15,8 +15,13 @@
 	2. 使用了850nm 90°红外一字激光器，20mW，链接都发在群里了
 	3. 由于使用了两个usb摄像头，需要在代码中指定设备名：
 		<1> $ cd /dev/v4l/by-path
-		<2> $ ls    usb摄像头的设备名仅和插的usb口位置相关！
+		<2> $ ls    查看usb摄像头设备名，usb摄像头的设备名仅和插的usb口位置相关！
 		<3> 在main.cpp中修改deviceRGB deviceIR，对应两个摄像头
+	4. 已测试，树莓派专用摄像头PiCamera可以使用此版本代码跑通，需要进行一下操作：
+		<1> 树莓派摄像头红外、可见光均可见，可以到我这边领取850nm窄带滤光片（仅剩1枚），850nm红外一字激光器需要自行购买。
+		<2> 插入PiCamera后，运行命令 $ sudo modprobe bcm2835-v4l2  ，PiCamera会被作为USB video设备
+		<3> $ ls /dev | grep video ，在不插USB摄像头的情况下运行此命令，会看到以下结果：video0，表示PiCamera路径为/dev/video0
+		<4> 修改PiCamera在main.cpp中的路径名称： deviceIR
 
 代码使用：
     1. 克隆代码 $ git clone https://github.com/anheidelonghu/TurnOffLight.git
@@ -36,8 +41,6 @@
 	树莓派对电源的电流和纹波要求较高，电源很关键！
     fps和cpu温度有关，需要增加散热。
     
-TODO：
-	我这边有6个树莓派IR摄像头，2个850nm窄带滤光片，"稍微"修改代码即可给两组使用。
 
 email：
     hxx_zju@zju.edu.cn
