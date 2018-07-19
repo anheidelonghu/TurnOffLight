@@ -49,7 +49,7 @@ int vLow = 128;
 int vHigh = 255;
 //串口设备信息
 const char* device = "/dev/ttyUSB0";
-int baudrate = 9600;
+int baudrate = 115200;
 //红灯检测和障碍物检测的标志信息
 string head = "S ";
 string sufix = "A";
@@ -69,6 +69,8 @@ auto t0 = get_time::now();
 auto t0_ir = get_time::now();
 auto t0_get = get_time::now();
 auto t0_ir_get = get_time::now();
+//auto global_time = get_time::now();
+//auto global_t0 = get_time::now();
 //v4l2 视频获取
 unsigned char *RGBframe = NULL;
 unsigned char *IRframe = NULL;
@@ -83,8 +85,10 @@ void get_cut(V4L2Capture& cap, Mat& img)
 	{
 		if(!flag_rgb)
 		{
-			if (lock.try_lock())
+			if (mtx.try_lock())
 			{
+				//global_time = get_time::now();
+				//cout << "global time A: " << chrono::duration_cast<Ms>(global_time-global_t0).count() << endl;
 				cap.getFrame((void **) &RGBframe, (size_t *)&RGBframeSize);
 				matRGB = Mat(rgbW,rgbH,CV_8UC3,(void*)RGBframe);
 				img = imdecode(matRGB,1);
@@ -94,14 +98,15 @@ void get_cut(V4L2Capture& cap, Mat& img)
 					cerr << "blank frame grabbed" << endl;
 					cap.backFrame();
 	
-					lock.unlock();
+					mtx.unlock();
 					continue;
 				}
+				
 				cap.backFrame();
-				cut = img(Rect(0, 100, 640, 380));
+				cut = img(Rect(0, 50, 640, 430));
 				//cut = img.clone();
 				flag_rgb = true;
-				lock.unlock();
+				mtx.unlock();
 				auto diff = get_time::now() - t0_get;
 				//限制帧率
 				if(chrono::duration_cast<Ms>(diff) < Ms(rgbGetInterval))
@@ -120,6 +125,7 @@ void get_cut(V4L2Capture& cap, Mat& img)
 void get_cut_ir(V4L2Capture& cap, Mat& img)
 {
 	unique_lock<timed_mutex> lock(mtx_ir, defer_lock);
+	
 	while (true)
 	{
 		//cout << "ir while" << endl;
@@ -183,7 +189,9 @@ void process(int fd, bool ifshow)
 				
 	
 			}
+			else continue;
 		}
+		else continue;
 		if (hsv.cols == 0) continue;
 		//flag_rgb = false;
 		inRange(hsv, Scalar(hLow, sLow, vLow), Scalar(hHigh, sHigh, vHigh), hsvOut);
@@ -193,6 +201,7 @@ void process(int fd, bool ifshow)
 		int py = 0;
 		int cnt = 0;
 		//auto t0_temp = get_time::now();
+		
 		findContours(hsvOut, contours, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_NONE);	//获取红灯轮廓
 		Moments mu;
 		//Point2f mc;
@@ -210,13 +219,28 @@ void process(int fd, bool ifshow)
 				py = mu.m01 / mu.m00;
 			}
 		}
+		cnt = maxArea;
+		/*
+		for (int col = 0; col < cols; col++)
+		{
+			for (int row = 0; row < rows; row++)
+			{
+				if (hsvOut.at<uchar>(cv::Point(col, row)) == 255)
+				{
+					px += col;
+					py += row;
+					cnt++;
+				}
+			}
+		}
+		*/
 		//auto t1_temp = get_time::now();
 		//auto diff_temp = t1_temp-t0_temp;
 		//cout << "my operation: " << chrono::duration_cast<Ms>(diff_temp).count() << endl;
-		cnt = maxArea;
+		
 		//cout << cnt << endl;
 		//最小像素数量=8
-		if(cnt < 8)
+		if(cnt < 4)
 		{
 			px = 0;
 			py = 0;
@@ -224,24 +248,30 @@ void process(int fd, bool ifshow)
 		}
 		else
 		{
-			//px += 50;
-			py += 100;
+			//px /= cnt;
+			//py /= cnt;
+			py += 50;
 		}
 		//串口数据发送
 		string message = head + to_string(px) + ' ' + to_string(py) + ' ' + to_string(cnt) + sufix;
 		const char* str1 = message.c_str();
 		char* str = const_cast<char*>(str1);
-		if(lock_usb.try_lock_for(std::chrono::milliseconds(2)))
+		if(mtx_usb.try_lock_for(std::chrono::milliseconds(2)))
 		{
+			serialFlush(fd);
 			serialPuts(fd,str);
-			lock_usb.unlock();
+			mtx_usb.unlock();
+			
 		}
+		//else cout << "%%%%%%%%%%%%%%%" << endl;
+		//global_time = get_time::now();
+		//cout << "global time B: " << chrono::duration_cast<Ms>(global_time-global_t0).count() << endl;
 		//显示rgb处理结果，有bug
 		if (ifshow)
 		{
 			cvtColor(hsvOut, hsvOut, CV_GRAY2BGR);
-			if (cnt > 8)
-				circle(hsvOut, Point(px, py-100), 5, Scalar(0, 0, 255), 5);
+			if (cnt > 4)
+				circle(hsvOut, Point(px, py-50), 5, Scalar(0, 0, 255), 5);
 			imshow("preview", hsvOut);
 			//imshow("cut", cut);
 			char c = waitKey(1);
@@ -270,7 +300,7 @@ void process_ir(int fd, bool ifshow)
 	unique_lock<timed_mutex> lock(mtx_ir, defer_lock);
 	unique_lock<timed_mutex> lock_usb(mtx_usb, defer_lock);
 	//名字取的不好，实际上是最小的被认为是障碍物的像素块大小。。。。。。减小此参数可以增加检测距离，提高灵敏度，太小会出玄学bug哦
-	double maxArea = 40;
+	double maxArea = 10;
 	int px = 0;
 	int py = 0;
 	int width = 0;
@@ -279,33 +309,33 @@ void process_ir(int fd, bool ifshow)
 	while(true)
 	{
 		//t0_ir = get_time::now();
-		if (mtx_ir.try_lock_for(Ms(8)) && flag_ir)
+		if(flag_ir)
 		{
-			flag_ir = false;
-			cout << cut_ir.cols << endl;
-			if (cut_ir.cols > 0)
+			if (mtx_ir.try_lock_for(Ms(8)) && flag_ir)
 			{
-				cvtColor(cut_ir, gray, CV_BGR2GRAY);
-				//gray = cut_ir.clone();
-				//imshow("cut_ir",cut_ir);
-				mtx_ir.unlock();
+				flag_ir = false;
+				//cout << cut_ir.cols << endl;
+				if (cut_ir.cols > 0)
+				{
+					cvtColor(cut_ir, gray, CV_BGR2GRAY);
+					//gray = cut_ir.clone();
+					//imshow("cut_ir",cut_ir);
+					mtx_ir.unlock();
+				}
+				else
+				{
+					mtx_ir.unlock();
+					continue;
+				}
 			}
-			else
-			{
-				mtx_ir.unlock();
-				continue;
-			}
+			else continue;
 		}
-		else
-		{
-			mtx_ir.unlock();
-			continue;
-		}
+		else continue;
 		
 		if(gray.cols == 0) continue;
 		//flag_ir = false;
 		//二值化，阈值与曝光时间设置有关
-		threshold(gray, bwImg, 50, 255, THRESH_BINARY);//threshold image
+		threshold(gray, bwImg, 30, 255, THRESH_BINARY);//threshold image
 		//腐蚀
 		erode(bwImg, erodeImg, getStructuringElement(MORPH_ELLIPSE, Size(3, 3)));//erode	
 		//找轮廓
@@ -337,11 +367,14 @@ void process_ir(int fd, bool ifshow)
 		message += sufix_ir;
 		const char* str1 = message.c_str();
 		char* str = const_cast<char*>(str1);
-		if(lock_usb.try_lock_for(std::chrono::milliseconds(2)))
+		/*
+		if(mtx_usb.try_lock_for(std::chrono::milliseconds(2)))
 		{
+			serialFlush(fd);
 			serialPuts(fd,str);
-			lock_usb.unlock();
+			mtx_usb.unlock();
 		}
+		*/
 		cout << message << endl;
 
 		auto diff = get_time::now() - t0_ir;
@@ -405,14 +438,14 @@ int main(int argc, char** argv)
 	//打印图像信息
 	Mat src, src_ir;
 	cout << "display image property" << endl;
-	while (capRGB.getFrame((void **)&RGBframe, (size_t *)&RGBframeSize) == -1) capRGB.backFrame();
+	while (capRGB.getFrame((void **)&RGBframe, (size_t *)&RGBframeSize) == -1) {capRGB.backFrame();usleep(1000000);}
 	matRGB = Mat(rgbW,rgbH,CV_8UC3,(void*)RGBframe);
 	src = imdecode(matRGB,1);
 	imwrite("src.png",src);
 	cout << "RGB image property -- rows: " << src.rows << " , cols: " << src.cols << endl;
 	capRGB.backFrame();
 	cout << "**********************************" << endl;
-	while (capIR.getFrame((void **)&IRframe, (size_t *)&IRframeSize) == -1) capIR.backFrame();
+	while (capIR.getFrame((void **)&IRframe, (size_t *)&IRframeSize) == -1) {capIR.backFrame();usleep(1000000);}
 	matIR = Mat(irW,irH,CV_8UC3,(void*)RGBframe);
 	src = imdecode(matRGB,1);//directly get gray image
 	cout << "IR image property -- rows: " << src_ir.rows << " , cols: " << src_ir.cols << endl;

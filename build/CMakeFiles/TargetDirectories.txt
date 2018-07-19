@@ -1,0 +1,4 @@
+/home/pi/raspberry/TurnOffLight/build/CMakeFiles/rebuild_cache.dir
+/home/pi/raspberry/TurnOffLight/build/CMakeFiles/edit_cache.dir
+/home/pi/raspberry/TurnOffLight/build/CMakeFiles/v4l2Demo.dir
+/home/pi/raspberry/TurnOffLight/build/CMakeFiles/main.dir
