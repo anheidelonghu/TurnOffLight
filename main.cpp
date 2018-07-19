@@ -261,7 +261,7 @@ void process(int fd, bool ifshow)
 			serialFlush(fd);
 			serialPuts(fd,str);
 			mtx_usb.unlock();
-			
+			cout << message << endl;
 		}
 		//else cout << "%%%%%%%%%%%%%%%" << endl;
 		//global_time = get_time::now();
@@ -280,7 +280,7 @@ void process(int fd, bool ifshow)
 				break;
 			}
 		}
-		cout << message << endl;
+		
 		//auto t6 = get_time::now();
 		auto diff = get_time::now() - t0;
 		//ÏÞÖÆÖ¡ÂÊ
@@ -367,15 +367,16 @@ void process_ir(int fd, bool ifshow)
 		message += sufix_ir;
 		const char* str1 = message.c_str();
 		char* str = const_cast<char*>(str1);
-		/*
+		
 		if(mtx_usb.try_lock_for(std::chrono::milliseconds(2)))
 		{
 			serialFlush(fd);
 			serialPuts(fd,str);
 			mtx_usb.unlock();
+			cout << message << endl;
 		}
-		*/
-		cout << message << endl;
+		
+		
 
 		auto diff = get_time::now() - t0_ir;
 		
